@@ -10,7 +10,7 @@ from auth import get_current_user
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import SessionLocal
-from models import Order as OrderModel, CourierPayout
+from models import Order as OrderModel, CourierPayout, CourierBonus
 
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
@@ -61,8 +61,13 @@ def calculate_distance(lat1, lng1, lat2, lng2):
 
 
 def get_commission_percent(distance_km: float) -> int:
-    # ✅ твоя логика: 40% до 3км, иначе 30%
-    return 40 if distance_km <= 3 else 30
+    """
+    Комиссия RIZQ:
+    - До 5 км: 30%
+    - Больше 5 км: 40%
+    """
+    return 30 if distance_km <= 5 else 40
+
 
 def courier_available_balance(db: Session, courier_phone: str) -> float:
     earned = db.query(func.sum(OrderModel.courier_earn)).filter(
@@ -83,9 +88,57 @@ def courier_available_balance(db: Session, courier_phone: str) -> float:
     return float(earned - paid - pending)
 
 
+def check_and_give_bonus(db: Session, courier_phone: str):
+    """
+    Проверяет количество доставок курьера и выдаёт бонусы:
+    - 100 доставок = 500 сомони
+    - 500 доставок = 1000 сомони
+    """
+    delivered_count = db.query(OrderModel).filter(
+        OrderModel.status == OrderStatus.DELIVERED.value,
+        OrderModel.courier == courier_phone
+    ).count()
+
+    # Проверка на 500 доставок
+    if delivered_count == 500:
+        existing = db.query(CourierBonus).filter(
+            CourierBonus.courier_phone == courier_phone,
+            CourierBonus.reason == "500_deliveries"
+        ).first()
+        if not existing:
+            bonus = CourierBonus(
+                courier_phone=courier_phone,
+                amount=1000.0,
+                reason="500_deliveries",
+                deliveries_count=500
+            )
+            db.add(bonus)
+            db.commit()
+            return {"bonus_given": True, "amount": 1000, "reason": "500 доставок"}
+
+    # Проверка на 100 доставок
+    elif delivered_count == 100:
+        existing = db.query(CourierBonus).filter(
+            CourierBonus.courier_phone == courier_phone,
+            CourierBonus.reason == "100_deliveries"
+        ).first()
+        if not existing:
+            bonus = CourierBonus(
+                courier_phone=courier_phone,
+                amount=500.0,
+                reason="100_deliveries",
+                deliveries_count=100
+            )
+            db.add(bonus)
+            db.commit()
+            return {"bonus_given": True, "amount": 500, "reason": "100 доставок"}
+
+    return {"bonus_given": False}
+
+
 # ================== SCHEMAS ==================
 class OrderCreate(BaseModel):
-    customer_phone: str  # для Swagger, реально берём phone из токена
+    customer_phone: str
     products: List[str]
     from_lat: float
     from_lng: float
@@ -106,12 +159,13 @@ class RateProduct(BaseModel):
     rating: int
     review: str = ""
 
+
 class PayoutRequest(BaseModel):
     amount: float
     note: str = ""
 
-# ================== SAFE ORDER VIEW ==================
 
+# ================== SAFE ORDER VIEW ==================
 def order_public(o: OrderModel, viewer_role: str):
     base = {
         "code": o.code,
@@ -120,24 +174,20 @@ def order_public(o: OrderModel, viewer_role: str):
         "created_at": o.created_at + timedelta(hours=5)
     }
 
-    # customer
     if viewer_role == "customer":
         base["price"] = o.delivery_price
         return base
 
-    # seller
     if viewer_role == "seller":
         base["price"] = o.delivery_price
         return base
 
-    # courier
     if viewer_role == "courier":
         base["courier_earn"] = o.courier_earn
         base["from"] = [o.from_lat, o.from_lng]
         base["to"] = [o.to_lat, o.to_lng]
         return base
 
-    # admin
     if viewer_role == "admin":
         base.update({
             "price": o.delivery_price,
@@ -152,6 +202,7 @@ def order_public(o: OrderModel, viewer_role: str):
         return base
 
     return base
+
 
 # ================== CREATE ==================
 @router.post("/create")
@@ -182,17 +233,14 @@ def create_order(
         customer_phone=customer_phone,
         status=OrderStatus.CREATED.value,
         products=data.products,
-
         seller_phone=None,
         courier=None,
-
         delivery_code=random.randint(100000, 999999),
         from_lat=data.from_lat,
         from_lng=data.from_lng,
         to_lat=data.to_lat,
         to_lng=data.to_lng,
         distance_km=distance,
-
         delivery_price=total_price,
         price_per_km=price_per_km,
         commission_percent=commission_percent,
@@ -254,7 +302,6 @@ def available_for_courier(
     ).all()
 
     return [order_public(o, "courier") for o in orders]
-
 
 
 # ================== COURIER ACCEPT ==================
@@ -344,7 +391,15 @@ def confirm_delivery(
     order.status = OrderStatus.DELIVERED.value
     db.commit()
 
-    return {"message": "Заказ доставлен"}
+    # Проверяем бонус курьера
+    bonus_result = check_and_give_bonus(db, order.courier)
+
+    response = {"message": "Заказ доставлен"}
+    if bonus_result["bonus_given"]:
+        response["bonus"] = bonus_result
+        response["bonus_message"] = f"🎉 Поздравляем! Вы получили бонус {bonus_result['amount']} сомони за {bonus_result['reason']}!"
+
+    return response
 
 
 # ================== MY ORDERS (CURRENT/HISTORY) ==================
@@ -355,37 +410,29 @@ def my_current(
 ):
     r = role_of(user)
 
-    # customer
     if r == "customer":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.customer_phone == phone,
             OrderModel.status != OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "customer") for o in orders]
 
-    # seller
     if r == "seller":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.seller_phone == phone,
             OrderModel.status != OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "seller") for o in orders]
 
-
-    # courier
     if r == "courier":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.courier == phone,
             OrderModel.status != OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "courier") for o in orders]
-
 
     raise HTTPException(status_code=403, detail="Неизвестная роль")
 
@@ -397,38 +444,29 @@ def my_history(
 ):
     r = role_of(user)
 
-    # customer
     if r == "customer":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.customer_phone == phone,
             OrderModel.status == OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "customer") for o in orders]
 
-
-    # seller
     if r == "seller":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.seller_phone == phone,
             OrderModel.status == OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "seller") for o in orders]
 
-
-    # courier
     if r == "courier":
         phone = require_phone(user)
         orders = db.query(OrderModel).filter(
             OrderModel.courier == phone,
             OrderModel.status == OrderStatus.DELIVERED.value
         ).order_by(OrderModel.created_at.desc()).all()
-
         return [order_public(o, "courier") for o in orders]
-
 
     raise HTTPException(status_code=403, detail="Неизвестная роль")
 
@@ -532,6 +570,7 @@ def seller_rating(
         "reviews_count": count_reviews
     }
 
+
 @router.get("/seller/dashboard")
 def seller_dashboard(
     user=Depends(get_current_user),
@@ -582,7 +621,6 @@ def seller_history(
         OrderModel.status == OrderStatus.DELIVERED.value
     ).order_by(OrderModel.created_at.desc()).all()
 
-    # seller не должен видеть rizq_fee, поэтому используем safe view
     return [order_public(o, "seller") for o in orders]
 
 
@@ -630,6 +668,51 @@ def courier_history(
 
     return [order_public(o, "courier") for o in orders]
 
+
+# ================== COURIER BONUSES ==================
+@router.get("/courier/bonuses")
+def courier_bonuses(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Получить список бонусов курьера"""
+    if role_of(user) != "courier":
+        raise HTTPException(status_code=403, detail="Только курьер")
+
+    courier_phone = require_phone(user)
+
+    bonuses = db.query(CourierBonus).filter(
+        CourierBonus.courier_phone == courier_phone
+    ).order_by(CourierBonus.created_at.desc()).all()
+
+    total_bonus = sum(b.amount for b in bonuses)
+
+    delivered_count = db.query(OrderModel).filter(
+        OrderModel.status == OrderStatus.DELIVERED.value,
+        OrderModel.courier == courier_phone
+    ).count()
+
+    next_bonus_at = 100 if delivered_count < 100 else (500 if delivered_count < 500 else None)
+    next_bonus_amount = 500 if delivered_count < 100 else (1000 if delivered_count < 500 else None)
+
+    return {
+        "courier_phone": courier_phone,
+        "total_bonus_earned": total_bonus,
+        "deliveries_count": delivered_count,
+        "next_bonus_at": next_bonus_at,
+        "next_bonus_amount": next_bonus_amount,
+        "remaining_deliveries": (next_bonus_at - delivered_count) if next_bonus_at else 0,
+        "bonuses_history": [
+            {
+                "id": b.id,
+                "amount": b.amount,
+                "reason": b.reason,
+                "deliveries_count": b.deliveries_count,
+                "date": b.created_at + timedelta(hours=5)
+            }
+            for b in bonuses
+        ]
+    }
 
 
 # ================== RIZQ ANALYTICS ==================
@@ -688,6 +771,7 @@ def rizq_daily_stats(
         }
         for s in stats
     ]
+
 
 @router.get("/rizq/top-sellers")
 def rizq_top_sellers(
@@ -764,6 +848,7 @@ def rizq_top_couriers(
         for r in rows
     ]
 
+
 @router.get("/courier/wallet")
 def courier_wallet(
     user=Depends(get_current_user),
@@ -792,6 +877,7 @@ def courier_wallet(
         "pending": float(pending),
         "paid_total": float(paid)
     }
+
 
 @router.post("/courier/payout/request")
 def request_payout(
@@ -833,6 +919,7 @@ def request_payout(
         "amount": payout.amount
     }
 
+
 @router.get("/rizq/payouts")
 def rizq_payouts(
     status: str = "pending",
@@ -862,6 +949,7 @@ def rizq_payouts(
         for p in rows
     ]
 
+
 @router.post("/rizq/payout/{payout_id}/mark_paid")
 def mark_payout_paid(
     payout_id: int,
@@ -881,6 +969,7 @@ def mark_payout_paid(
     db.commit()
 
     return {"message": "Выплата отмечена как paid", "payout_id": payout.id}
+
 
 @router.post("/rizq/payout/{payout_id}/reject")
 def reject_payout(

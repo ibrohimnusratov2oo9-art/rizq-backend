@@ -93,3 +93,13 @@ class CourierPayout(Base):
     status = Column(String, default="pending")  # pending, paid, rejected
     note = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # ====================== COURIER BONUS ======================
+class CourierBonus(Base):
+    __tablename__ = "courier_bonuses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    courier_phone = Column(String, nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    reason = Column(String, nullable=False)  # "100_deliveries" or "500_deliveries"
+    deliveries_count = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
