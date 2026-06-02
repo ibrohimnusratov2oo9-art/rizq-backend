@@ -90,34 +90,50 @@ def courier_available_balance(db: Session, courier_phone: str) -> float:
 
 def check_and_give_bonus(db: Session, courier_phone: str):
     """
-    Проверяет количество доставок курьера и выдаёт бонусы:
-    - 100 доставок = 500 сомони
-    - 500 доставок = 1000 сомони
+    Проверяет количество доставок курьера:
+    - Уведомления только на: 1, 50, 90, 99, 100, 490, 499, 500
+    - Бонусы на 100 и 500
+    - После 500 счётчик останавливается
     """
     delivered_count = db.query(OrderModel).filter(
         OrderModel.status == OrderStatus.DELIVERED.value,
         OrderModel.courier == courier_phone
     ).count()
 
-    # Проверка на 500 доставок
-    if delivered_count == 500:
-        existing = db.query(CourierBonus).filter(
-            CourierBonus.courier_phone == courier_phone,
-            CourierBonus.reason == "500_deliveries"
-        ).first()
-        if not existing:
-            bonus = CourierBonus(
-                courier_phone=courier_phone,
-                amount=1000.0,
-                reason="500_deliveries",
-                deliveries_count=500
-            )
-            db.add(bonus)
-            db.commit()
-            return {"bonus_given": True, "amount": 1000, "reason": "500 доставок"}
+    result = {
+        "bonus_given": False,
+        "delivered_count": delivered_count,
+        "show_notification": False,
+        "notification_title": "",
+        "notification_message": "",
+        "notification_emoji": "",
+        "next_bonus_at": None,
+        "next_bonus_amount": None,
+        "remaining_deliveries": 0,
+        "current_milestone": 100,  # Текущая цель (100 или 500)
+        "is_max_reached": False
+    }
 
-    # Проверка на 100 доставок
-    elif delivered_count == 100:
+    # === ОПРЕДЕЛЯЕМ ТЕКУЩУЮ ЦЕЛЬ ===
+    if delivered_count <= 100:
+        result["current_milestone"] = 100
+        result["next_bonus_at"] = 100
+        result["next_bonus_amount"] = 500
+        result["remaining_deliveries"] = 100 - delivered_count
+    elif delivered_count <= 500:
+        result["current_milestone"] = 500
+        result["next_bonus_at"] = 500
+        result["next_bonus_amount"] = 1000
+        result["remaining_deliveries"] = 500 - delivered_count
+    else:
+        result["is_max_reached"] = True
+        result["current_milestone"] = 500
+        result["next_bonus_at"] = None
+        result["next_bonus_amount"] = None
+        result["remaining_deliveries"] = 0
+
+    # === ПРОВЕРКА БОНУСА 100 ДОСТАВОК ===
+    if delivered_count == 100:
         existing = db.query(CourierBonus).filter(
             CourierBonus.courier_phone == courier_phone,
             CourierBonus.reason == "100_deliveries"
@@ -131,9 +147,112 @@ def check_and_give_bonus(db: Session, courier_phone: str):
             )
             db.add(bonus)
             db.commit()
-            return {"bonus_given": True, "amount": 500, "reason": "100 доставок"}
+            result["bonus_given"] = True
+            result["show_notification"] = True
+            result["notification_emoji"] = "🎁🎉🎁"
+            result["notification_title"] = "ПОЗДРАВЛЯЕМ!"
+            result["notification_message"] = (
+                f"🎉 Вы выполнили 100 доставок!\n\n"
+                f"💰 Ваш бонус: 500 сомони\n\n"
+                f"Теперь зарабатывайте до 500 доставок\n"
+                f"для бонуса 1000 сомони!"
+            )
 
-    return {"bonus_given": False}
+    # === ПРОВЕРКА БОНУСА 500 ДОСТАВОК ===
+    elif delivered_count == 500:
+        existing = db.query(CourierBonus).filter(
+            CourierBonus.courier_phone == courier_phone,
+            CourierBonus.reason == "500_deliveries"
+        ).first()
+        if not existing:
+            bonus = CourierBonus(
+                courier_phone=courier_phone,
+                amount=1000.0,
+                reason="500_deliveries",
+                deliveries_count=500
+            )
+            db.add(bonus)
+            db.commit()
+            result["bonus_given"] = True
+            result["show_notification"] = True
+            result["notification_emoji"] = "🏆🎊🏆"
+            result["notification_title"] = "ВЫ ПРОФЕССИОНАЛ!"
+            result["notification_message"] = (
+                f"🎊 Вы выполнили 500 доставок!\n\n"
+                f"💰 Ваш бонус: 1000 сомони\n\n"
+                f"Всего получено бонусов:\n"
+                f"💎 1500 сомони\n\n"
+                f"Спасибо за вашу работу! ⭐"
+            )
+
+    # === УВЕДОМЛЕНИЯ НА КЛЮЧЕВЫХ ТОЧКАХ (если не было бонуса) ===
+    elif delivered_count == 1:
+        result["show_notification"] = True
+        result["notification_emoji"] = "🎉"
+        result["notification_title"] = "Первая доставка!"
+        result["notification_message"] = (
+            f"🎯 1 / 100 доставок\n\n"
+            f"🎁 До бонуса 500 сомони\n"
+            f"осталось 99 доставок!\n\n"
+            f"Удачи! 🚀"
+        )
+
+    elif delivered_count == 50:
+        result["show_notification"] = True
+        result["notification_emoji"] = "🔥"
+        result["notification_title"] = "Половина пути!"
+        result["notification_message"] = (
+            f"🎯 50 / 100 доставок\n\n"
+            f"🎁 До бонуса 500 сомони\n"
+            f"осталось 50 доставок!\n\n"
+            f"Вы на правильном пути! 💪"
+        )
+
+    elif delivered_count == 90:
+        result["show_notification"] = True
+        result["notification_emoji"] = "⚡"
+        result["notification_title"] = "Почти бонус!"
+        result["notification_message"] = (
+            f"🎯 90 / 100 доставок\n\n"
+            f"🎁 До бонуса 500 сомони\n"
+            f"осталось всего 10 доставок!\n\n"
+            f"Финишная прямая! ⚡"
+        )
+
+    elif delivered_count == 99:
+        result["show_notification"] = True
+        result["notification_emoji"] = "🎯"
+        result["notification_title"] = "Последняя доставка!"
+        result["notification_message"] = (
+            f"🎯 99 / 100 доставок\n\n"
+            f"🎁 ЕЩЁ 1 ДОСТАВКА!\n"
+            f"и вы получите 500 сомони! 💰\n\n"
+            f"ВПЕРЁД! 🔥"
+        )
+
+    elif delivered_count == 490:
+        result["show_notification"] = True
+        result["notification_emoji"] = "⚡"
+        result["notification_title"] = "Почти бонус!"
+        result["notification_message"] = (
+            f"🎯 490 / 500 доставок\n\n"
+            f"🎁 До бонуса 1000 сомони\n"
+            f"осталось всего 10 доставок!\n\n"
+            f"Финишная прямая! ⚡"
+        )
+
+    elif delivered_count == 499:
+        result["show_notification"] = True
+        result["notification_emoji"] = "🎯"
+        result["notification_title"] = "Последняя доставка!"
+        result["notification_message"] = (
+            f"🎯 499 / 500 доставок\n\n"
+            f"🎁 ЕЩЁ 1 ДОСТАВКА!\n"
+            f"и вы получите 1000 сомони! 💰\n\n"
+            f"ВПЕРЁД! 🔥"
+        )
+
+    return result
 
 
 # ================== SCHEMAS ==================
@@ -391,13 +510,30 @@ def confirm_delivery(
     order.status = OrderStatus.DELIVERED.value
     db.commit()
 
-    # Проверяем бонус курьера
+    # Проверяем бонус и прогресс
     bonus_result = check_and_give_bonus(db, order.courier)
 
-    response = {"message": "Заказ доставлен"}
-    if bonus_result["bonus_given"]:
-        response["bonus"] = bonus_result
-        response["bonus_message"] = f"🎉 Поздравляем! Вы получили бонус {bonus_result['amount']} сомони за {bonus_result['reason']}!"
+    response = {
+        "message": "Заказ доставлен",
+        "courier_earn": order.courier_earn,
+        "earnings_message": f"💰 Вы заработали: {order.courier_earn} сомони",
+        "delivered_count": bonus_result["delivered_count"],
+        "current_milestone": bonus_result["current_milestone"],
+        "next_bonus_at": bonus_result["next_bonus_at"],
+        "next_bonus_amount": bonus_result["next_bonus_amount"],
+        "remaining_deliveries": bonus_result["remaining_deliveries"],
+        "is_max_reached": bonus_result["is_max_reached"],
+        "show_notification": bonus_result["show_notification"]
+   }
+
+    # Если нужно показать уведомление
+    if bonus_result["show_notification"]:
+        response["notification"] = {
+            "emoji": bonus_result["notification_emoji"],
+            "title": bonus_result["notification_title"],
+            "message": bonus_result["notification_message"],
+            "is_bonus": bonus_result["bonus_given"]
+      }
 
     return response
 
@@ -671,11 +807,12 @@ def courier_history(
 
 # ================== COURIER BONUSES ==================
 @router.get("/courier/bonuses")
+@router.get("/courier/bonuses")
 def courier_bonuses(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получить список бонусов курьера"""
+    """Получить прогресс и бонусы курьера"""
     if role_of(user) != "courier":
         raise HTTPException(status_code=403, detail="Только курьер")
 
@@ -692,16 +829,39 @@ def courier_bonuses(
         OrderModel.courier == courier_phone
     ).count()
 
-    next_bonus_at = 100 if delivered_count < 100 else (500 if delivered_count < 500 else None)
-    next_bonus_amount = 500 if delivered_count < 100 else (1000 if delivered_count < 500 else None)
+    # === ОПРЕДЕЛЯЕМ ТЕКУЩИЙ СТАТУС ===
+    if delivered_count <= 100:
+        # До 100 доставок
+        current_milestone = 100
+        next_bonus_amount = 500
+        progress_percent = (delivered_count / 100) * 100
+        is_max_reached = False
+        status_text = "Прогресс к первому бонусу"
+    elif delivered_count <= 500:
+        # До 500 доставок
+        current_milestone = 500
+        next_bonus_amount = 1000
+        progress_percent = (delivered_count / 500) * 100
+        is_max_reached = False
+        status_text = "Прогресс ко второму бонусу"
+    else:
+        # После 500 - всё получено
+        current_milestone = 500
+        next_bonus_amount = None
+        progress_percent = 100
+        is_max_reached = True
+        status_text = "Все бонусы получены! 🏆"
 
     return {
         "courier_phone": courier_phone,
-        "total_bonus_earned": total_bonus,
         "deliveries_count": delivered_count,
-        "next_bonus_at": next_bonus_at,
+        "current_milestone": current_milestone,
         "next_bonus_amount": next_bonus_amount,
-        "remaining_deliveries": (next_bonus_at - delivered_count) if next_bonus_at else 0,
+        "progress_percent": round(progress_percent, 2),
+        "remaining_deliveries": current_milestone - delivered_count if not is_max_reached else 0,
+        "is_max_reached": is_max_reached,
+        "status_text": status_text,
+        "total_bonus_earned": total_bonus,
         "bonuses_history": [
             {
                 "id": b.id,
@@ -713,7 +873,6 @@ def courier_bonuses(
             for b in bonuses
         ]
     }
-
 
 # ================== RIZQ ANALYTICS ==================
 @router.get("/rizq/dashboard")
