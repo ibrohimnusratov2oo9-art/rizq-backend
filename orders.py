@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import SessionLocal
 from models import Order as OrderModel, CourierPayout, CourierBonus
-
+from models import Order as OrderModel, CourierPayout, CourierBonus, User
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
 
@@ -334,35 +334,118 @@ def create_order(
         raise HTTPException(status_code=403, detail="Только клиент")
 
     customer_phone = require_phone(user)
+    
+    # Получаем пользователя для подписки
+    current_user = db.query(User).filter(User.phone == customer_phone).first()
 
     distance = calculate_distance(
         data.from_lat, data.from_lng,
         data.to_lat, data.to_lng
     )
 
-    price_per_km = 5
-    commission_percent = get_commission_percent(distance)
-
-    total_price = round(distance * price_per_km, 2)
-    rizq_fee = round(total_price * commission_percent / 100, 2)
-    courier_earn = round(total_price - rizq_fee, 2)
+    # ====== НОВЫЙ РАСЧЁТ ЦЕНЫ ДОСТАВКИ ======
+    # 1-3 км: 15 сомони
+    # 4+ км: 15 + (расстояние - 3) × 5
+    if distance <= 3:
+        delivery_price = 15.0
+    else:
+        delivery_price = 15.0 + (distance - 3) * 5
+    
+    # ====== ДОПЛАТЫ ======
+    current_hour = datetime.utcnow().hour + 5  # Душанбе +5 UTC
+    if current_hour >= 24:
+        current_hour -= 24
+    
+    time_surcharge = 0
+    if 18 <= current_hour < 22:
+        # Вечер: +2 с/км
+        time_surcharge = distance * 2
+    elif current_hour >= 22 or current_hour < 8:
+        # Ночь: +5 с/км
+        time_surcharge = distance * 5
+    
+    # Погода (пока 0, потом добавим API погоды)
+    weather_surcharge = 0
+    
+    # ====== SERVICE FEE (скрыто!) ======
+    service_fee = 5.0
+    
+    # ====== ПРОВЕРКА ПОДПИСКИ ======
+    is_subscription_order = False
+    discount_applied = 0
+    final_delivery_price = delivery_price
+    final_service_fee = service_fee
+    
+    if current_user and current_user.subscription_type in ["plus", "premium"]:
+        # Проверяем не истекла ли подписка
+        if current_user.subscription_expires and datetime.utcnow() < current_user.subscription_expires:
+            sub_limits = {"plus": 5, "premium": 15}
+            sub_discounts = {"plus": 5, "premium": 10}
+            
+            limit = sub_limits[current_user.subscription_type]
+            
+            # Если ещё есть бесплатные доставки
+            if current_user.free_deliveries_used < limit:
+                final_delivery_price = 0  # Бесплатная доставка!
+                final_service_fee = 0  # Service Fee тоже бесплатно
+                is_subscription_order = True
+                
+                # Увеличиваем счётчик
+                current_user.free_deliveries_used += 1
+                db.commit()
+            else:
+                final_service_fee = 0  # Service Fee бесплатно для подписчиков
+            
+            # Применяем скидку на еду
+            discount_applied = sub_discounts[current_user.subscription_type]
+    
+    # ====== РАСЧЁТ ДЛЯ КУРЬЕРА И RIZQ ======
+    # Курьер получает: 70% от доставки + 100% доплат
+    # RIZQ получает: 30% от доставки + Service Fee
+    
+    base_delivery_for_calc = delivery_price  # Берём базовую цену для расчётов
+    commission_percent = 30 if distance <= 5 else 40
+    
+    rizq_from_delivery = round(base_delivery_for_calc * commission_percent / 100, 2)
+    courier_from_delivery = round(base_delivery_for_calc - rizq_from_delivery, 2)
+    
+    # Доплаты ВСЕ идут курьеру
+    courier_earn = courier_from_delivery + time_surcharge + weather_surcharge
+    rizq_fee = rizq_from_delivery + service_fee  # RIZQ берёт комиссию + service fee
+    
+    # Общая цена для клиента (что он видит)
+    total_for_customer = final_delivery_price + final_service_fee + time_surcharge + weather_surcharge
+    
+    # Генерируем 2 кода
+    pickup_code = random.randint(1000, 9999)  # Код от ресторана
+    delivery_code = random.randint(100000, 999999)  # Код от клиента
 
     order = OrderModel(
         code=random.randint(1000, 9999),
         customer_phone=customer_phone,
         status=OrderStatus.CREATED.value,
         products=data.products,
+
         seller_phone=None,
         courier=None,
-        delivery_code=random.randint(100000, 999999),
+
+        pickup_code=pickup_code,
+        delivery_code=delivery_code,
+        
         from_lat=data.from_lat,
         from_lng=data.from_lng,
         to_lat=data.to_lat,
         to_lng=data.to_lng,
         distance_km=distance,
-        delivery_price=total_price,
-        price_per_km=price_per_km,
+
+        delivery_price=final_delivery_price,
+        price_per_km=5,
         commission_percent=commission_percent,
+        time_surcharge=time_surcharge,
+        weather_surcharge=weather_surcharge,
+        service_fee=final_service_fee,
+        is_subscription_order=is_subscription_order,
+        discount_applied=discount_applied,
         rizq_fee=rizq_fee,
         courier_earn=courier_earn
     )
@@ -374,9 +457,14 @@ def create_order(
     return {
         "message": "Заказ создан",
         "order_code": order.code,
-        "price": order.delivery_price,
-        "distance_km": order.distance_km,
-        "delivery_code": order.delivery_code,
+        "delivery_price": final_delivery_price,
+        "time_surcharge": time_surcharge,
+        "weather_surcharge": weather_surcharge,
+        "discount_applied": discount_applied,
+        "total_price": total_for_customer,
+        "distance_km": distance,
+        "delivery_code": delivery_code,  # Клиент видит этот код
+        "is_subscription_order": is_subscription_order,
         "created_at": order.created_at + timedelta(hours=5)
     }
 

@@ -5,10 +5,12 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import hashlib
+import random
 
 from database import SessionLocal
 from models import User
 from dependencies import get_current_user
+from email_service import send_verification_email  # ← НОВОЕ!
 
 router = APIRouter(prefix="/auth", tags=["Авторизация"])
 
@@ -44,12 +46,23 @@ class UserRegister(BaseModel):
     full_name: str | None = None
     email: str | None = None
 
+class EmailVerification(BaseModel):
+    email: str
+    code: str
+
+class SendVerificationCode(BaseModel):
+    email: str
+
 # CREATE TOKEN
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# Генерация кода для email
+def generate_verification_code():
+    return str(random.randint(100000, 999999))
 
 # REGISTER
 @router.post("/register")
@@ -81,7 +94,8 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         "phone": new_user.phone,
         "role": new_user.role,
         "user_id": new_user.id,
-        "needs_verification": new_user.role == "courier"
+        "needs_passport_verification": new_user.role == "courier",
+        "has_email": bool(new_user.email)
     }
 
 # LOGIN
@@ -116,9 +130,74 @@ def me(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "full_name": current_user.full_name,
         "email": current_user.email,
+        "email_verified": current_user.email_verified,
         "is_active": current_user.is_active,
         "is_verified": current_user.is_verified,
-        "passport_photo": current_user.passport_photo,
-        "selfie_photo": current_user.selfie_photo,
-        "selfie_with_passport": current_user.selfie_with_passport,
+        "subscription_type": current_user.subscription_type,
+        "subscription_expires": current_user.subscription_expires
+    }
+
+# ================== EMAIL VERIFICATION ==================
+
+@router.post("/send-verification-email")
+def send_verification(data: SendVerificationCode, db: Session = Depends(get_db)):
+    """Отправить код подтверждения на email"""
+    user = db.query(User).filter(User.email == data.email).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    if user.email_verified:
+        raise HTTPException(status_code=400, detail="Email уже подтверждён")
+    
+    # Генерируем код
+    code = generate_verification_code()
+    expires = datetime.utcnow() + timedelta(minutes=10)
+    
+    # Сохраняем в базу
+    user.email_code = code
+    user.email_code_expires = expires
+    db.commit()
+    
+    # Отправляем email
+    try:
+        send_verification_email(data.email, code)
+        return {
+            "message": "Код отправлен на email",
+            "email": data.email,
+            "expires_in_minutes": 10
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка отправки email: {str(e)}")
+
+
+@router.post("/verify-email")
+def verify_email(data: EmailVerification, db: Session = Depends(get_db)):
+    """Проверить код подтверждения email"""
+    user = db.query(User).filter(User.email == data.email).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    if user.email_verified:
+        raise HTTPException(status_code=400, detail="Email уже подтверждён")
+    
+    if not user.email_code:
+        raise HTTPException(status_code=400, detail="Сначала запросите код")
+    
+    if datetime.utcnow() > user.email_code_expires:
+        raise HTTPException(status_code=400, detail="Код истёк, запросите новый")
+    
+    if user.email_code != data.code:
+        raise HTTPException(status_code=400, detail="Неверный код")
+    
+    # Подтверждаем email
+    user.email_verified = True
+    user.email_code = None
+    user.email_code_expires = None
+    db.commit()
+    
+    return {
+        "message": "Email успешно подтверждён ✅",
+        "email": user.email
     }
