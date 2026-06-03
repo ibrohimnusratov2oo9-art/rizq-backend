@@ -10,7 +10,9 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=False)
-    role = Column(String, nullable=False)  # customer, seller, courier, admin
+    password = Column(String, nullable=False)  # ← НОВОЕ!
+    email = Column(String, nullable=True)  # ← НОВОЕ!
+    role = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     language = Column(String, default="ru")
     is_active = Column(Boolean, default=True)
@@ -25,15 +27,15 @@ class Order(Base):
 
     customer_phone = Column(String, nullable=False)
     seller_phone = Column(String, nullable=True)
-    courier = Column(String, nullable=True)  # ← ИСПРАВИЛ: было courier_phone
+    courier = Column(String, nullable=True)
 
     status = Column(String, default="создан")
 
     products = Column(JSON, nullable=False)
-    total_price = Column(Float, nullable=True)  # ← ДОБАВИЛ
+    total_price = Column(Float, nullable=True)
     delivery_price = Column(Float, nullable=False)
-    price_per_km = Column(Float, nullable=True)  # ← ДОБАВИЛ
-    commission_percent = Column(Integer, nullable=True)  # ← ДОБАВИЛ
+    price_per_km = Column(Float, nullable=True)
+    commission_percent = Column(Integer, nullable=True)
 
     from_lat = Column(Float, nullable=True)
     from_lng = Column(Float, nullable=True)
@@ -76,7 +78,7 @@ class Seller(Base):
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String, unique=True, nullable=False)
     name = Column(String, nullable=False)
-    seller_type = Column(String, nullable=False)   # restaurant or market
+    seller_type = Column(String, nullable=False)
     address = Column(String, nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
@@ -90,16 +92,17 @@ class CourierPayout(Base):
     id = Column(Integer, primary_key=True, index=True)
     courier_phone = Column(String, nullable=False, index=True)
     amount = Column(Float, nullable=False)
-    status = Column(String, default="pending")  # pending, paid, rejected
+    status = Column(String, default="pending")
     note = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    # ====================== COURIER BONUS ======================
+
+# ====================== COURIER BONUS ======================
 class CourierBonus(Base):
     __tablename__ = "courier_bonuses"
 
     id = Column(Integer, primary_key=True, index=True)
     courier_phone = Column(String, nullable=False, index=True)
     amount = Column(Float, nullable=False)
-    reason = Column(String, nullable=False)  # "100_deliveries" or "500_deliveries"
+    reason = Column(String, nullable=False)
     deliveries_count = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

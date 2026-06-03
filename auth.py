@@ -4,20 +4,21 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import hashlib
 
 from database import SessionLocal
 from models import User
-from dependencies import get_current_user   # мы создадим этот файл позже
+from dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Авторизация"])
 
-SECRET_KEY = "SECRET123"   # потом вынесем в .env
+SECRET_KEY = "SECRET123"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 24
+ACCESS_TOKEN_EXPIRE_HOURS = 24 * 30  # 30 дней
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# ================== DEPENDENCY ==================
+# ================== DB ==================
 def get_db():
     db = SessionLocal()
     try:
@@ -25,7 +26,16 @@ def get_db():
     finally:
         db.close()
 
-# ================== Pydantic Models ==================
+# ================== ХЭШИРОВАНИЕ ==================
+def hash_password(password: str) -> str:
+    """Превращаем пароль в хэш"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверяем пароль"""
+    return hash_password(plain_password) == hashed_password
+
+# ================== MODELS ==================
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -35,6 +45,7 @@ class UserRegister(BaseModel):
     password: str
     role: str
     full_name: str | None = None
+    email: str | None = None
 
 # ================== CREATE TOKEN ==================
 def create_access_token(data: dict):
@@ -46,7 +57,7 @@ def create_access_token(data: dict):
 # ================== REGISTER ==================
 @router.post("/register")
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    # Проверка, существует ли уже такой телефон
+    # Проверяем существующего
     existing = db.query(User).filter(User.phone == user_data.phone).first()
     if existing:
         raise HTTPException(status_code=400, detail="Пользователь с таким номером уже существует")
@@ -54,17 +65,27 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     if user_data.role not in ["customer", "seller", "courier"]:
         raise HTTPException(status_code=400, detail="Неверная роль")
 
+    # Хэшируем пароль!
+    hashed_pwd = hash_password(user_data.password)
+
     new_user = User(
         phone=user_data.phone,
+        password=hashed_pwd,
         role=user_data.role,
-        full_name=user_data.full_name
+        full_name=user_data.full_name,
+        email=user_data.email
     )
 
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    return {"message": "Регистрация успешна", "phone": new_user.phone, "role": new_user.role}
+    return {
+        "message": "Регистрация успешна",
+        "phone": new_user.phone,
+        "role": new_user.role,
+        "user_id": new_user.id
+    }
 
 # ================== LOGIN ==================
 @router.post("/login", response_model=Token)
@@ -74,9 +95,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
 
-    # Пока пароль простой (1234). Позже добавим хэширование
-    if form_data.password != "1234":
+    # Проверяем хэшированный пароль
+    if not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=401, detail="Неверный пароль")
+
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Аккаунт заблокирован")
 
     access_token = create_access_token({
         "sub": user.phone,
@@ -94,5 +118,7 @@ def me(current_user: User = Depends(get_current_user)):
         "id": current_user.id,
         "phone": current_user.phone,
         "role": current_user.role,
-        "full_name": current_user.full_name
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "is_active": current_user.is_active
     }
