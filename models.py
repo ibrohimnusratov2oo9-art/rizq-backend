@@ -10,12 +10,19 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)  # ← НОВОЕ!
-    email = Column(String, nullable=True)  # ← НОВОЕ!
+    password = Column(String, nullable=False)
+    email = Column(String, nullable=True)
     role = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     language = Column(String, default="ru")
     is_active = Column(Boolean, default=True)
+    
+    # Для курьеров - документы
+    passport_photo = Column(String, nullable=True)
+    selfie_photo = Column(String, nullable=True)
+    selfie_with_passport = Column(String, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # ====================== ORDER ======================
@@ -43,7 +50,9 @@ class Order(Base):
     to_lng = Column(Float, nullable=True)
     distance_km = Column(Float, nullable=True)
 
-    delivery_code = Column(Integer, nullable=True)
+    # ДВА КОДА!
+    pickup_code = Column(Integer, nullable=True)  # Код от ресторана курьеру
+    delivery_code = Column(Integer, nullable=True)  # Код от клиента курьеру
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

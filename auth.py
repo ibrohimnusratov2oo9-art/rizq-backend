@@ -14,11 +14,10 @@ router = APIRouter(prefix="/auth", tags=["Авторизация"])
 
 SECRET_KEY = "SECRET123"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 24 * 30  # 30 дней
+ACCESS_TOKEN_EXPIRE_HOURS = 24 * 30
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# ================== DB ==================
 def get_db():
     db = SessionLocal()
     try:
@@ -26,16 +25,14 @@ def get_db():
     finally:
         db.close()
 
-# ================== ХЭШИРОВАНИЕ ==================
+# ХЭШИРОВАНИЕ
 def hash_password(password: str) -> str:
-    """Превращаем пароль в хэш"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяем пароль"""
     return hash_password(plain_password) == hashed_password
 
-# ================== MODELS ==================
+# MODELS
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -47,17 +44,16 @@ class UserRegister(BaseModel):
     full_name: str | None = None
     email: str | None = None
 
-# ================== CREATE TOKEN ==================
+# CREATE TOKEN
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# ================== REGISTER ==================
+# REGISTER
 @router.post("/register")
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    # Проверяем существующего
     existing = db.query(User).filter(User.phone == user_data.phone).first()
     if existing:
         raise HTTPException(status_code=400, detail="Пользователь с таким номером уже существует")
@@ -65,7 +61,6 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     if user_data.role not in ["customer", "seller", "courier"]:
         raise HTTPException(status_code=400, detail="Неверная роль")
 
-    # Хэшируем пароль!
     hashed_pwd = hash_password(user_data.password)
 
     new_user = User(
@@ -73,7 +68,8 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         password=hashed_pwd,
         role=user_data.role,
         full_name=user_data.full_name,
-        email=user_data.email
+        email=user_data.email,
+        is_verified=False if user_data.role == "courier" else True
     )
 
     db.add(new_user)
@@ -84,10 +80,11 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         "message": "Регистрация успешна",
         "phone": new_user.phone,
         "role": new_user.role,
-        "user_id": new_user.id
+        "user_id": new_user.id,
+        "needs_verification": new_user.role == "courier"
     }
 
-# ================== LOGIN ==================
+# LOGIN
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.phone == form_data.username).first()
@@ -95,7 +92,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
 
-    # Проверяем хэшированный пароль
     if not verify_password(form_data.password, user.password):
         raise HTTPException(status_code=401, detail="Неверный пароль")
 
@@ -111,7 +107,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
     return {"access_token": access_token, "token_type": "bearer"}
 
-# ================== ME ==================
+# ME
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
     return {
@@ -120,5 +116,9 @@ def me(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "full_name": current_user.full_name,
         "email": current_user.email,
-        "is_active": current_user.is_active
+        "is_active": current_user.is_active,
+        "is_verified": current_user.is_verified,
+        "passport_photo": current_user.passport_photo,
+        "selfie_photo": current_user.selfie_photo,
+        "selfie_with_passport": current_user.selfie_with_passport,
     }
