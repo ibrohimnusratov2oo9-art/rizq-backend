@@ -12,6 +12,7 @@ from sellers import router as sellers_router
 from users import router as users_router
 from onboarding import router as onboarding_router
 from subscriptions import router as subscriptions_router  # ← НОВОЕ!
+from admin import router as admin_router
 
 # Создаём таблицы при запуске
 Base.metadata.create_all(bind=engine)
@@ -45,6 +46,8 @@ app.include_router(sellers_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(subscriptions_router, prefix=API_PREFIX)
+app.include_router(admin_router, prefix=API_PREFIX)
+
 @app.get("/")
 def root():
     return {
