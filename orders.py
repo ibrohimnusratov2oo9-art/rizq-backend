@@ -3,14 +3,13 @@ from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 import random
-from datetime import timedelta
+from datetime import timedelta, datetime
 import math
 
 from auth import get_current_user
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import SessionLocal
-from models import Order as OrderModel, CourierPayout, CourierBonus
 from models import Order as OrderModel, CourierPayout, CourierBonus, User
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
@@ -27,11 +26,25 @@ def get_db():
 
 # ================== USER HELPERS ==================
 def role_of(user):
-    return user if isinstance(user, str) else user.get("role")
+    """Получить роль пользователя"""
+    if isinstance(user, str):
+        return user
+    if hasattr(user, 'role'):
+        return user.role
+    if isinstance(user, dict):
+        return user.get("role")
+    return None
 
 
 def phone_of(user):
-    return None if isinstance(user, str) else user.get("phone")
+    """Получить телефон пользователя"""
+    if isinstance(user, str):
+        return None
+    if hasattr(user, 'phone'):
+        return user.phone
+    if isinstance(user, dict):
+        return user.get("phone")
+    return None
 
 
 def require_phone(user):
@@ -61,11 +74,6 @@ def calculate_distance(lat1, lng1, lat2, lng2):
 
 
 def get_commission_percent(distance_km: float) -> int:
-    """
-    Комиссия RIZQ:
-    - До 5 км: 30%
-    - Больше 5 км: 40%
-    """
     return 30 if distance_km <= 5 else 40
 
 
@@ -89,12 +97,6 @@ def courier_available_balance(db: Session, courier_phone: str) -> float:
 
 
 def check_and_give_bonus(db: Session, courier_phone: str):
-    """
-    Проверяет количество доставок курьера:
-    - Уведомления только на: 1, 50, 90, 99, 100, 490, 499, 500
-    - Бонусы на 100 и 500
-    - После 500 счётчик останавливается
-    """
     delivered_count = db.query(OrderModel).filter(
         OrderModel.status == OrderStatus.DELIVERED.value,
         OrderModel.courier == courier_phone
@@ -110,11 +112,10 @@ def check_and_give_bonus(db: Session, courier_phone: str):
         "next_bonus_at": None,
         "next_bonus_amount": None,
         "remaining_deliveries": 0,
-        "current_milestone": 100,  # Текущая цель (100 или 500)
+        "current_milestone": 100,
         "is_max_reached": False
     }
 
-    # === ОПРЕДЕЛЯЕМ ТЕКУЩУЮ ЦЕЛЬ ===
     if delivered_count <= 100:
         result["current_milestone"] = 100
         result["next_bonus_at"] = 100
@@ -132,7 +133,6 @@ def check_and_give_bonus(db: Session, courier_phone: str):
         result["next_bonus_amount"] = None
         result["remaining_deliveries"] = 0
 
-    # === ПРОВЕРКА БОНУСА 100 ДОСТАВОК ===
     if delivered_count == 100:
         existing = db.query(CourierBonus).filter(
             CourierBonus.courier_phone == courier_phone,
@@ -157,8 +157,6 @@ def check_and_give_bonus(db: Session, courier_phone: str):
                 f"Теперь зарабатывайте до 500 доставок\n"
                 f"для бонуса 1000 сомони!"
             )
-
-    # === ПРОВЕРКА БОНУСА 500 ДОСТАВОК ===
     elif delivered_count == 500:
         existing = db.query(CourierBonus).filter(
             CourierBonus.courier_phone == courier_phone,
@@ -184,73 +182,6 @@ def check_and_give_bonus(db: Session, courier_phone: str):
                 f"💎 1500 сомони\n\n"
                 f"Спасибо за вашу работу! ⭐"
             )
-
-    # === УВЕДОМЛЕНИЯ НА КЛЮЧЕВЫХ ТОЧКАХ (если не было бонуса) ===
-    elif delivered_count == 1:
-        result["show_notification"] = True
-        result["notification_emoji"] = "🎉"
-        result["notification_title"] = "Первая доставка!"
-        result["notification_message"] = (
-            f"🎯 1 / 100 доставок\n\n"
-            f"🎁 До бонуса 500 сомони\n"
-            f"осталось 99 доставок!\n\n"
-            f"Удачи! 🚀"
-        )
-
-    elif delivered_count == 50:
-        result["show_notification"] = True
-        result["notification_emoji"] = "🔥"
-        result["notification_title"] = "Половина пути!"
-        result["notification_message"] = (
-            f"🎯 50 / 100 доставок\n\n"
-            f"🎁 До бонуса 500 сомони\n"
-            f"осталось 50 доставок!\n\n"
-            f"Вы на правильном пути! 💪"
-        )
-
-    elif delivered_count == 90:
-        result["show_notification"] = True
-        result["notification_emoji"] = "⚡"
-        result["notification_title"] = "Почти бонус!"
-        result["notification_message"] = (
-            f"🎯 90 / 100 доставок\n\n"
-            f"🎁 До бонуса 500 сомони\n"
-            f"осталось всего 10 доставок!\n\n"
-            f"Финишная прямая! ⚡"
-        )
-
-    elif delivered_count == 99:
-        result["show_notification"] = True
-        result["notification_emoji"] = "🎯"
-        result["notification_title"] = "Последняя доставка!"
-        result["notification_message"] = (
-            f"🎯 99 / 100 доставок\n\n"
-            f"🎁 ЕЩЁ 1 ДОСТАВКА!\n"
-            f"и вы получите 500 сомони! 💰\n\n"
-            f"ВПЕРЁД! 🔥"
-        )
-
-    elif delivered_count == 490:
-        result["show_notification"] = True
-        result["notification_emoji"] = "⚡"
-        result["notification_title"] = "Почти бонус!"
-        result["notification_message"] = (
-            f"🎯 490 / 500 доставок\n\n"
-            f"🎁 До бонуса 1000 сомони\n"
-            f"осталось всего 10 доставок!\n\n"
-            f"Финишная прямая! ⚡"
-        )
-
-    elif delivered_count == 499:
-        result["show_notification"] = True
-        result["notification_emoji"] = "🎯"
-        result["notification_title"] = "Последняя доставка!"
-        result["notification_message"] = (
-            f"🎯 499 / 500 доставок\n\n"
-            f"🎁 ЕЩЁ 1 ДОСТАВКА!\n"
-            f"и вы получите 1000 сомони! 💰\n\n"
-            f"ВПЕРЁД! 🔥"
-        )
 
     return result
 
@@ -335,7 +266,6 @@ def create_order(
 
     customer_phone = require_phone(user)
     
-    # Получаем пользователя для подписки
     current_user = db.query(User).filter(User.phone == customer_phone).first()
 
     distance = calculate_distance(
@@ -343,101 +273,78 @@ def create_order(
         data.to_lat, data.to_lng
     )
 
-    # ====== НОВЫЙ РАСЧЁТ ЦЕНЫ ДОСТАВКИ ======
-    # 1-3 км: 15 сомони
-    # 4+ км: 15 + (расстояние - 3) × 5
+    # Расчёт цены
     if distance <= 3:
         delivery_price = 15.0
     else:
         delivery_price = 15.0 + (distance - 3) * 5
     
-    # ====== ДОПЛАТЫ ======
-    current_hour = datetime.utcnow().hour + 5  # Душанбе +5 UTC
+    # Доплаты
+    current_hour = datetime.utcnow().hour + 5
     if current_hour >= 24:
         current_hour -= 24
     
     time_surcharge = 0
     if 18 <= current_hour < 22:
-        # Вечер: +2 с/км
         time_surcharge = distance * 2
     elif current_hour >= 22 or current_hour < 8:
-        # Ночь: +5 с/км
         time_surcharge = distance * 5
     
-    # Погода (пока 0, потом добавим API погоды)
     weather_surcharge = 0
-    
-    # ====== SERVICE FEE (скрыто!) ======
     service_fee = 5.0
     
-    # ====== ПРОВЕРКА ПОДПИСКИ ======
+    # Проверка подписки
     is_subscription_order = False
     discount_applied = 0
     final_delivery_price = delivery_price
     final_service_fee = service_fee
     
     if current_user and current_user.subscription_type in ["plus", "premium"]:
-        # Проверяем не истекла ли подписка
         if current_user.subscription_expires and datetime.utcnow() < current_user.subscription_expires:
             sub_limits = {"plus": 5, "premium": 15}
             sub_discounts = {"plus": 5, "premium": 10}
             
             limit = sub_limits[current_user.subscription_type]
             
-            # Если ещё есть бесплатные доставки
             if current_user.free_deliveries_used < limit:
-                final_delivery_price = 0  # Бесплатная доставка!
-                final_service_fee = 0  # Service Fee тоже бесплатно
+                final_delivery_price = 0
+                final_service_fee = 0
                 is_subscription_order = True
-                
-                # Увеличиваем счётчик
                 current_user.free_deliveries_used += 1
                 db.commit()
             else:
-                final_service_fee = 0  # Service Fee бесплатно для подписчиков
+                final_service_fee = 0
             
-            # Применяем скидку на еду
             discount_applied = sub_discounts[current_user.subscription_type]
     
-    # ====== РАСЧЁТ ДЛЯ КУРЬЕРА И RIZQ ======
-    # Курьер получает: 70% от доставки + 100% доплат
-    # RIZQ получает: 30% от доставки + Service Fee
-    
-    base_delivery_for_calc = delivery_price  # Берём базовую цену для расчётов
+    base_delivery_for_calc = delivery_price
     commission_percent = 30 if distance <= 5 else 40
     
     rizq_from_delivery = round(base_delivery_for_calc * commission_percent / 100, 2)
     courier_from_delivery = round(base_delivery_for_calc - rizq_from_delivery, 2)
     
-    # Доплаты ВСЕ идут курьеру
     courier_earn = courier_from_delivery + time_surcharge + weather_surcharge
-    rizq_fee = rizq_from_delivery + service_fee  # RIZQ берёт комиссию + service fee
+    rizq_fee = rizq_from_delivery + service_fee
     
-    # Общая цена для клиента (что он видит)
     total_for_customer = final_delivery_price + final_service_fee + time_surcharge + weather_surcharge
     
-    # Генерируем 2 кода
-    pickup_code = random.randint(1000, 9999)  # Код от ресторана
-    delivery_code = random.randint(100000, 999999)  # Код от клиента
+    pickup_code = random.randint(1000, 9999)
+    delivery_code = random.randint(100000, 999999)
 
     order = OrderModel(
         code=random.randint(1000, 9999),
         customer_phone=customer_phone,
         status=OrderStatus.CREATED.value,
         products=data.products,
-
         seller_phone=None,
         courier=None,
-
         pickup_code=pickup_code,
         delivery_code=delivery_code,
-        
         from_lat=data.from_lat,
         from_lng=data.from_lng,
         to_lat=data.to_lat,
         to_lng=data.to_lng,
         distance_km=distance,
-
         delivery_price=final_delivery_price,
         price_per_km=5,
         commission_percent=commission_percent,
@@ -463,7 +370,7 @@ def create_order(
         "discount_applied": discount_applied,
         "total_price": total_for_customer,
         "distance_km": distance,
-        "delivery_code": delivery_code,  # Клиент видит этот код
+        "delivery_code": delivery_code,
         "is_subscription_order": is_subscription_order,
         "created_at": order.created_at + timedelta(hours=5)
     }
@@ -598,7 +505,6 @@ def confirm_delivery(
     order.status = OrderStatus.DELIVERED.value
     db.commit()
 
-    # Проверяем бонус и прогресс
     bonus_result = check_and_give_bonus(db, order.courier)
 
     response = {
@@ -612,21 +518,20 @@ def confirm_delivery(
         "remaining_deliveries": bonus_result["remaining_deliveries"],
         "is_max_reached": bonus_result["is_max_reached"],
         "show_notification": bonus_result["show_notification"]
-   }
+    }
 
-    # Если нужно показать уведомление
     if bonus_result["show_notification"]:
         response["notification"] = {
             "emoji": bonus_result["notification_emoji"],
             "title": bonus_result["notification_title"],
             "message": bonus_result["notification_message"],
             "is_bonus": bonus_result["bonus_given"]
-      }
+        }
 
     return response
 
 
-# ================== MY ORDERS (CURRENT/HISTORY) ==================
+# ================== MY ORDERS ==================
 @router.get("/my/current")
 def my_current(
     user=Depends(get_current_user),
@@ -895,12 +800,10 @@ def courier_history(
 
 # ================== COURIER BONUSES ==================
 @router.get("/courier/bonuses")
-@router.get("/courier/bonuses")
 def courier_bonuses(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получить прогресс и бонусы курьера"""
     if role_of(user) != "courier":
         raise HTTPException(status_code=403, detail="Только курьер")
 
@@ -917,23 +820,19 @@ def courier_bonuses(
         OrderModel.courier == courier_phone
     ).count()
 
-    # === ОПРЕДЕЛЯЕМ ТЕКУЩИЙ СТАТУС ===
     if delivered_count <= 100:
-        # До 100 доставок
         current_milestone = 100
         next_bonus_amount = 500
         progress_percent = (delivered_count / 100) * 100
         is_max_reached = False
         status_text = "Прогресс к первому бонусу"
     elif delivered_count <= 500:
-        # До 500 доставок
         current_milestone = 500
         next_bonus_amount = 1000
         progress_percent = (delivered_count / 500) * 100
         is_max_reached = False
         status_text = "Прогресс ко второму бонусу"
     else:
-        # После 500 - всё получено
         current_milestone = 500
         next_bonus_amount = None
         progress_percent = 100
@@ -962,6 +861,7 @@ def courier_bonuses(
         ]
     }
 
+
 # ================== RIZQ ANALYTICS ==================
 @router.get("/rizq/dashboard")
 def rizq_dashboard(
@@ -983,117 +883,6 @@ def rizq_dashboard(
         "rizq_income_total": float(total_income),
         "courier_paid_total": float(total_courier_paid)
     }
-
-
-@router.get("/rizq/stats/daily")
-def rizq_daily_stats(
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    day_col = func.date(OrderModel.created_at)
-
-    stats = (
-        db.query(
-            day_col.label("date"),
-            func.count(OrderModel.code).label("orders_count"),
-            func.sum(OrderModel.delivery_price).label("turnover"),
-            func.sum(OrderModel.rizq_fee).label("income"),
-            func.sum(OrderModel.courier_earn).label("courier_paid"),
-        )
-        .filter(OrderModel.status == OrderStatus.DELIVERED.value)
-        .group_by(day_col)
-        .order_by(day_col)
-        .all()
-    )
-
-    return [
-        {
-            "date": str(s.date),
-            "orders": int(s.orders_count or 0),
-            "turnover": float(s.turnover or 0),
-            "rizq_income": float(s.income or 0),
-            "courier_paid": float(s.courier_paid or 0),
-        }
-        for s in stats
-    ]
-
-
-@router.get("/rizq/top-sellers")
-def rizq_top_sellers(
-    limit: int = 10,
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    limit = max(1, min(limit, 50))
-
-    rows = (
-        db.query(
-            OrderModel.seller_phone.label("seller_phone"),
-            func.count(OrderModel.code).label("orders_count"),
-            func.sum(OrderModel.delivery_price).label("turnover"),
-            func.avg(OrderModel.product_rating).label("avg_rating"),
-        )
-        .filter(
-            OrderModel.status == OrderStatus.DELIVERED.value,
-            OrderModel.seller_phone.isnot(None)
-        )
-        .group_by(OrderModel.seller_phone)
-        .order_by(func.sum(OrderModel.delivery_price).desc())
-        .limit(limit)
-        .all()
-    )
-
-    return [
-        {
-            "seller_phone": r.seller_phone,
-            "orders": int(r.orders_count or 0),
-            "turnover": float(r.turnover or 0),
-            "avg_rating": round(float(r.avg_rating), 2) if r.avg_rating is not None else None
-        }
-        for r in rows
-    ]
-
-
-@router.get("/rizq/couriers/top")
-def rizq_top_couriers(
-    limit: int = 10,
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    limit = max(1, min(limit, 50))
-
-    rows = (
-        db.query(
-            OrderModel.courier.label("courier_phone"),
-            func.count(OrderModel.code).label("delivered_orders"),
-            func.sum(OrderModel.courier_earn).label("earned"),
-            func.avg(OrderModel.courier_rating).label("avg_rating"),
-        )
-        .filter(
-            OrderModel.status == OrderStatus.DELIVERED.value,
-            OrderModel.courier.isnot(None)
-        )
-        .group_by(OrderModel.courier)
-        .order_by(func.sum(OrderModel.courier_earn).desc())
-        .limit(limit)
-        .all()
-    )
-
-    return [
-        {
-            "courier_phone": r.courier_phone,
-            "delivered_orders": int(r.delivered_orders or 0),
-            "earned_total": float(r.earned or 0),
-            "avg_rating": round(float(r.avg_rating), 2) if r.avg_rating is not None else None
-        }
-        for r in rows
-    ]
 
 
 @router.get("/courier/wallet")
@@ -1165,77 +954,3 @@ def request_payout(
         "status": payout.status,
         "amount": payout.amount
     }
-
-
-@router.get("/rizq/payouts")
-def rizq_payouts(
-    status: str = "pending",
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    if status not in ["pending", "paid", "rejected", "all"]:
-        raise HTTPException(status_code=400, detail="status должен быть pending/paid/rejected/all")
-
-    q = db.query(CourierPayout).order_by(CourierPayout.created_at.desc())
-    if status != "all":
-        q = q.filter(CourierPayout.status == status)
-
-    rows = q.limit(100).all()
-
-    return [
-        {
-            "id": p.id,
-            "courier_phone": p.courier_phone,
-            "amount": p.amount,
-            "status": p.status,
-            "note": p.note,
-            "created_at": p.created_at + timedelta(hours=5)
-        }
-        for p in rows
-    ]
-
-
-@router.post("/rizq/payout/{payout_id}/mark_paid")
-def mark_payout_paid(
-    payout_id: int,
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    payout = db.query(CourierPayout).filter(CourierPayout.id == payout_id).first()
-    if not payout:
-        raise HTTPException(status_code=404, detail="Запрос не найден")
-
-    if payout.status != "pending":
-        raise HTTPException(status_code=400, detail="Можно оплатить только pending")
-
-    payout.status = "paid"
-    db.commit()
-
-    return {"message": "Выплата отмечена как paid", "payout_id": payout.id}
-
-
-@router.post("/rizq/payout/{payout_id}/reject")
-def reject_payout(
-    payout_id: int,
-    reason: str = "",
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    require_admin(user)
-
-    payout = db.query(CourierPayout).filter(CourierPayout.id == payout_id).first()
-    if not payout:
-        raise HTTPException(status_code=404, detail="Запрос не найден")
-
-    if payout.status != "pending":
-        raise HTTPException(status_code=400, detail="Можно отклонить только pending")
-
-    payout.status = "rejected"
-    payout.note = (reason or payout.note or "").strip() or None
-    db.commit()
-
-    return {"message": "Выплата отклонена", "payout_id": payout.id}
