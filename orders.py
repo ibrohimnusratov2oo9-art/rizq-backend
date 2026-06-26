@@ -331,12 +331,22 @@ def create_order(
     pickup_code = random.randint(1000, 9999)
     delivery_code = random.randint(100000, 999999)
 
+    # Находим seller_phone из товара
+    from models import Product as ProductModel
+    seller_phone = None
+    if data.products and len(data.products) > 0:
+        first_product = db.query(ProductModel).filter(
+            ProductModel.name == data.products[0]
+        ).first()
+        if first_product:
+            seller_phone = first_product.seller_phone
+
     order = OrderModel(
         code=random.randint(1000, 9999),
         customer_phone=customer_phone,
-        status=OrderStatus.CREATED.value,
+        status=OrderStatus.READY.value,
         products=data.products,
-        seller_phone=None,
+        seller_phone=seller_phone,
         courier=None,
         pickup_code=pickup_code,
         delivery_code=delivery_code,
