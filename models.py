@@ -56,13 +56,13 @@ class Order(Base):
     commission_percent = Column(Integer, nullable=True)
     
     # Доплаты
-    time_surcharge = Column(Float, default=0)  # вечер/ночь
-    weather_surcharge = Column(Float, default=0)  # дождь/снег
-    service_fee = Column(Float, default=5)  # service fee (скрыто)
+    time_surcharge = Column(Float, default=0)
+    weather_surcharge = Column(Float, default=0)
+    service_fee = Column(Float, default=5)
     
     # Подписка использована
     is_subscription_order = Column(Boolean, default=False)
-    discount_applied = Column(Float, default=0)  # 5% или 10%
+    discount_applied = Column(Float, default=0)
 
     from_lat = Column(Float, nullable=True)
     from_lng = Column(Float, nullable=True)
@@ -71,8 +71,8 @@ class Order(Base):
     distance_km = Column(Float, nullable=True)
 
     # 2 КОДА
-    pickup_code = Column(Integer, nullable=True)  # Код от ресторана курьеру
-    delivery_code = Column(Integer, nullable=True)  # Код от клиента курьеру
+    pickup_code = Column(Integer, nullable=True)
+    delivery_code = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -147,11 +147,24 @@ class Subscription(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_phone = Column(String, nullable=False, index=True)
-    subscription_type = Column(String, nullable=False)  # plus, premium
+    subscription_type = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     start_date = Column(DateTime, default=datetime.utcnow)
     end_date = Column(DateTime, nullable=False)
     is_active = Column(Boolean, default=True)
     free_deliveries_used = Column(Integer, default=0)
-    free_deliveries_limit = Column(Integer, nullable=False)  # 5 или 15
+    free_deliveries_limit = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ====================== ACTIVITY LOG ======================
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_phone = Column(String, nullable=True, index=True)
+    action = Column(String, nullable=False)
+    details = Column(String, nullable=True)
+    device = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

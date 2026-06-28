@@ -370,3 +370,188 @@ def get_all_payouts(db: Session = Depends(get_db)):
         }
         for p in payouts
     ]
+# ================== ЛОГИ АКТИВНОСТИ ==================
+@router.get("/logs")
+def get_activity_logs(limit: int = 100, db: Session = Depends(get_db)):
+    """Получить логи активности"""
+    try:
+        from models import ActivityLog
+        logs = db.query(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(limit).all()
+        return [
+            {
+                "id": l.id,
+                "user_phone": l.user_phone,
+                "action": l.action,
+                "details": l.details,
+                "device": l.device,
+                "ip_address": l.ip_address,
+                "created_at": (l.created_at + timedelta(hours=5)).isoformat() if l.created_at else None
+            }
+            for l in logs
+        ]
+    except Exception as e:
+        return []
+
+
+# ================== НОВЫЕ СОБЫТИЯ (для уведомлений) ==================
+@router.get("/notifications")
+def get_notifications(db: Session = Depends(get_db)):
+    """Получить последние события для уведомлений"""
+    
+    # Новые пользователи за последние 5 минут
+    five_min_ago = datetime.utcnow() - timedelta(minutes=5)
+    
+    new_users = db.query(User).filter(
+        User.created_at >= five_min_ago
+    ).order_by(User.created_at.desc()).all()
+    
+    # Новые заказы за последние 5 минут
+    new_orders = db.query(Order).filter(
+        Order.created_at >= five_min_ago
+    ).order_by(Order.created_at.desc()).all()
+    
+    # Все заказы с изменённым статусом (последние 5 минут)
+    recent_orders = db.query(Order).filter(
+        Order.updated_at >= five_min_ago
+    ).order_by(Order.updated_at.desc()).all()
+    
+    notifications = []
+    
+    for u in new_users:
+        notifications.append({
+            "type": "new_user",
+            "sound": True,
+            "title": "🆕 Новый пользователь!",
+            "message": f"{u.phone} ({u.role}) зарегистрировался",
+            "time": (u.created_at + timedelta(hours=5)).isoformat() if u.created_at else None
+        })
+    
+    for o in new_orders:
+        if o.status == "создан" or o.status == "готов":
+            notifications.append({
+                "type": "new_order",
+                "sound": True,
+                "title": "🛒 Новый заказ!",
+                "message": f"Заказ #{o.code} от {o.customer_phone}",
+                "time": (o.created_at + timedelta(hours=5)).isoformat() if o.created_at else None
+            })
+    
+    for o in recent_orders:
+        if o.status in ["принят", "забран", "доставлен"]:
+            notifications.append({
+                "type": "order_status",
+                "sound": False,
+                "title": f"📦 Заказ #{o.code}",
+                "message": f"Статус: {o.status}",
+                "time": (o.updated_at + timedelta(hours=5)).isoformat() if o.updated_at else None
+            })
+    
+    return {
+        "count": len(notifications),
+        "notifications": notifications
+    }
+
+
+# ================== РЕДАКТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ ==================
+@router.put("/users/{user_id}")
+def update_user(user_id: int, db: Session = Depends(get_db), 
+                full_name: str = None, email: str = None, 
+                subscription_type: str = None):
+    """Редактировать пользователя"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    if full_name is not None:
+        user.full_name = full_name
+    if email is not None:
+        user.email = email
+    if subscription_type is not None:
+        user.subscription_type = subscription_type
+    
+    db.commit()
+    return {"message": "Пользователь обновлён"}
+
+
+# ================== РЕДАКТИРОВАНИЕ РЕСТОРАНА ==================
+@router.put("/sellers/{seller_id}")
+def update_seller_admin(seller_id: int, db: Session = Depends(get_db),
+                        name: str = None, address: str = None,
+                        is_active: bool = None):
+    """Редактировать ресторан"""
+    seller = db.query(Seller).filter(Seller.id == seller_id).first()
+    if not seller:
+        raise HTTPException(status_code=404, detail="Ресторан не найден")
+    
+    if name is not None:
+        seller.name = name
+    if address is not None:
+        seller.address = address
+    if is_active is not None:
+        seller.is_active = is_active
+    
+    db.commit()
+    return {"message": "Ресторан обновлён"}
+
+
+# ================== РЕДАКТИРОВАНИЕ ТОВАРА ==================
+@router.put("/products/{product_id}")
+def update_product_admin(product_id: int, db: Session = Depends(get_db),
+                         name: str = None, price: float = None,
+                         is_available: bool = None):
+    """Редактировать товар"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    
+    if name is not None:
+        product.name = name
+    if price is not None:
+        product.price = price
+    if is_available is not None:
+        product.is_available = is_available
+    
+    db.commit()
+    return {"message": "Товар обновлён"}
+
+
+# ================== УДАЛЕНИЕ ТОВАРА ==================
+@router.delete("/products/{product_id}")
+def delete_product_admin(product_id: int, db: Session = Depends(get_db)):
+    """Удалить товар"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    
+    db.delete(product)
+    db.commit()
+    return {"message": "Товар удалён"}
+
+
+# ================== УПРАВЛЕНИЕ ЗАКАЗАМИ ==================
+@router.put("/orders/{order_id}/status")
+def update_order_status(order_id: int, status: str, db: Session = Depends(get_db)):
+    """Изменить статус заказа"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    
+    valid_statuses = ["создан", "готов", "принят", "забран", "доставлен"]
+    if status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Статус должен быть: {', '.join(valid_statuses)}")
+    
+    order.status = status
+    db.commit()
+    return {"message": f"Статус заказа изменён на: {status}"}
+
+
+@router.delete("/orders/{order_id}")
+def cancel_order(order_id: int, db: Session = Depends(get_db)):
+    """Отменить заказ"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    
+    db.delete(order)
+    db.commit()
+    return {"message": "Заказ отменён"}
