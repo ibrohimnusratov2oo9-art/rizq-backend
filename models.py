@@ -168,3 +168,15 @@ class ActivityLog(Base):
     device = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+# ====================== CHAT MESSAGE ======================
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_code = Column(Integer, nullable=False, index=True)
+    sender_phone = Column(String, nullable=False)
+    sender_role = Column(String, nullable=False)  # customer, courier, seller
+    message = Column(String, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)    

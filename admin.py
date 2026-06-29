@@ -621,3 +621,26 @@ def get_order_detail(order_id: int, db: Session = Depends(get_db)):
             "is_verified": courier.is_verified if courier else None,
         } if courier else {"phone": order.courier},
     }
+
+# ================== ЧАТ ==================
+from models import ChatMessage
+
+@router.get("/chat/{order_code}")
+def get_chat_messages(order_code: int, db: Session = Depends(get_db)):
+    """Получить сообщения чата по заказу"""
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.order_code == order_code
+    ).order_by(ChatMessage.created_at.asc()).all()
+    
+    return [
+        {
+            "id": m.id,
+            "order_code": m.order_code,
+            "sender_phone": m.sender_phone,
+            "sender_role": m.sender_role,
+            "message": m.message,
+            "is_read": m.is_read,
+            "created_at": (m.created_at + timedelta(hours=5)).isoformat() if m.created_at else None
+        }
+        for m in messages
+    ]
