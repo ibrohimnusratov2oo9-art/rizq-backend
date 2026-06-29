@@ -555,3 +555,69 @@ def cancel_order(order_id: int, db: Session = Depends(get_db)):
     db.delete(order)
     db.commit()
     return {"message": "Заказ отменён"}
+
+# ================== ДЕТАЛИ ЗАКАЗА ==================
+@router.get("/orders/{order_id}")
+def get_order_detail(order_id: int, db: Session = Depends(get_db)):
+    """Получить детальную информацию о заказе"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    
+    # Информация о клиенте
+    customer = db.query(User).filter(User.phone == order.customer_phone).first()
+    
+    # Информация о ресторане
+    seller = None
+    seller_info = None
+    if order.seller_phone:
+        seller = db.query(User).filter(User.phone == order.seller_phone).first()
+        seller_info = db.query(Seller).filter(Seller.phone == order.seller_phone).first()
+    
+    # Информация о курьере
+    courier = None
+    if order.courier:
+        courier = db.query(User).filter(User.phone == order.courier).first()
+    
+    return {
+        "order": {
+            "id": order.id,
+            "code": order.code,
+            "status": order.status,
+            "products": order.products,
+            "delivery_price": order.delivery_price,
+            "rizq_fee": order.rizq_fee,
+            "courier_earn": order.courier_earn,
+            "distance_km": order.distance_km,
+            "time_surcharge": order.time_surcharge,
+            "weather_surcharge": order.weather_surcharge,
+            "service_fee": order.service_fee,
+            "pickup_code": order.pickup_code,
+            "delivery_code": order.delivery_code,
+            "from_lat": order.from_lat,
+            "from_lng": order.from_lng,
+            "to_lat": order.to_lat,
+            "to_lng": order.to_lng,
+            "courier_rating": order.courier_rating,
+            "product_rating": order.product_rating,
+            "created_at": (order.created_at + timedelta(hours=5)).isoformat() if order.created_at else None,
+            "updated_at": (order.updated_at + timedelta(hours=5)).isoformat() if order.updated_at else None,
+        },
+        "customer": {
+            "phone": customer.phone if customer else order.customer_phone,
+            "full_name": customer.full_name if customer else None,
+            "email": customer.email if customer else None,
+            "subscription": customer.subscription_type if customer else None,
+        } if customer else {"phone": order.customer_phone},
+        "restaurant": {
+            "phone": seller_info.phone if seller_info else order.seller_phone,
+            "name": seller_info.name if seller_info else None,
+            "type": seller_info.seller_type if seller_info else None,
+            "address": seller_info.address if seller_info else None,
+        } if seller_info else {"phone": order.seller_phone},
+        "courier": {
+            "phone": courier.phone if courier else order.courier,
+            "full_name": courier.full_name if courier else None,
+            "is_verified": courier.is_verified if courier else None,
+        } if courier else {"phone": order.courier},
+    }
