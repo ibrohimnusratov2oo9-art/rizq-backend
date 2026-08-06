@@ -89,13 +89,36 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
+    # ================== АВТООТПРАВКА EMAIL КОДА ==================
+    email_sent = False
+    if new_user.email:
+        try:
+            # Генерируем код
+            code = generate_verification_code()
+            expires = datetime.utcnow() + timedelta(minutes=10)
+
+            # Сохраняем в базу
+            new_user.email_code = code
+            new_user.email_code_expires = expires
+            db.commit()
+
+            # Отправляем email в фоне (не блокируем регистрацию)
+            send_verification_email(new_user.email, code)
+            email_sent = True
+        except Exception as e:
+            # Если email не отправился — регистрация всё равно успешна
+            print(f"⚠️ Не удалось отправить email при регистрации: {e}")
+            email_sent = False
+    # ============================================================
+
     return {
         "message": "Регистрация успешна",
         "phone": new_user.phone,
         "role": new_user.role,
         "user_id": new_user.id,
         "needs_passport_verification": new_user.role == "courier",
-        "has_email": bool(new_user.email)
+        "has_email": bool(new_user.email),
+        "email_code_sent": email_sent  # ← НОВОЕ: показывает, отправился ли код
     }
 
 # LOGIN

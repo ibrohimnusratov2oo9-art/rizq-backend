@@ -1,69 +1,69 @@
 import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 
-# ВАЖНО: Замени на свой Gmail!
-SENDER_EMAIL = os.getenv("SENDER_EMAIL", "your-email@gmail.com")
-SENDER_PASSWORD = os.getenv("SENDER_PASSWORD", "your-app-password")
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
-def send_verification_email(to_email: str, code: str):
-    """Отправляем код верификации на email"""
-    
-    subject = "RIZQ - Код подтверждения"
-    
+
+def send_verification_email(to_email: str, code: str) -> bool:
+    """Отправляет email с кодом подтверждения"""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        raise Exception("SMTP credentials not configured in environment")
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = f"RIZQ <{SMTP_USER}>"
+    msg["To"] = to_email
+    msg["Subject"] = "Код подтверждения RIZQ"
+
     html_body = f"""
+    <!DOCTYPE html>
     <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #FF6B35, #E55A2B); padding: 30px; border-radius: 20px; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 36px;">RIZQ</h1>
-                <p style="color: white; margin: 10px 0 0 0;">Доставка еды в Душанбе</p>
+    <head>
+        <meta charset="UTF-8">
+    </head>
+    <body style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; margin: 0;">
+        <div style="max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 40px; text-align: center;">
+            
+            <h1 style="color: #F26522; margin: 0; font-size: 32px;">RIZQ</h1>
+            <p style="color: #666; font-size: 14px; margin: 5px 0 0 0;">Доставка еды в Душанбе</p>
+            
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+            
+            <h2 style="color: #222; font-size: 20px; margin: 0 0 10px 0;">Код подтверждения</h2>
+            <p style="color: #666; font-size: 14px; margin: 0;">Введите этот код в приложении:</p>
+            
+            <div style="background: #FFF5EE; border: 2px dashed #F26522; border-radius: 12px; padding: 24px; margin: 24px 0;">
+                <h1 style="color: #F26522; letter-spacing: 8px; margin: 0; font-size: 40px; font-weight: bold;">{code}</h1>
             </div>
             
-            <div style="background: white; padding: 30px; margin-top: 20px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h2 style="color: #1A1A2E; margin-top: 0;">Здравствуйте!</h2>
-                <p style="color: #6C757D; font-size: 16px; line-height: 1.6;">
-                    Спасибо за регистрацию в RIZQ! Для подтверждения вашего email используйте этот код:
-                </p>
-                
-                <div style="background: #FFF8F5; border: 2px dashed #FF6B35; padding: 20px; text-align: center; border-radius: 12px; margin: 20px 0;">
-                    <div style="font-size: 42px; font-weight: bold; color: #FF6B35; letter-spacing: 8px;">
-                        {code}
-                    </div>
-                    <p style="color: #6C757D; margin: 10px 0 0 0; font-size: 14px;">
-                        Код действителен 10 минут
-                    </p>
-                </div>
-                
-                <p style="color: #6C757D; font-size: 14px; line-height: 1.6;">
-                    Если вы не регистрировались в RIZQ, просто игнорируйте это письмо.
-                </p>
-                
-                <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 20px 0;">
-                
-                <p style="color: #9CA3AF; font-size: 12px; text-align: center; margin: 0;">
-                    © 2025 RIZQ. Все права защищены.
-                </p>
-            </div>
-        </body>
+            <p style="color: #999; font-size: 13px; margin: 8px 0;">Код действителен 10 минут</p>
+            <p style="color: #999; font-size: 12px; margin: 8px 0;">Если вы не запрашивали код, просто игнорируйте это письмо</p>
+            
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+            
+            <p style="color: #999; font-size: 11px; margin: 0; line-height: 1.6;">
+                <strong style="color: #F26522;">RIZQ</strong> — доставка еды в Душанбе<br>
+                rizqgo.tj@gmail.com
+            </p>
+            
+        </div>
+    </body>
     </html>
     """
-    
-    # Создаём письмо
-    message = MIMEMultipart("alternative")
-    message["Subject"] = subject
-    message["From"] = f"RIZQ <{SENDER_EMAIL}>"
-    message["To"] = to_email
-    
-    html_part = MIMEText(html_body, "html")
-    message.attach(html_part)
-    
-    # Отправляем через Gmail SMTP
+
+    msg.attach(MIMEText(html_body, "html"))
+
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.send_message(message)
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+        print(f"✅ Email sent to {to_email}")
         return True
     except Exception as e:
-        print(f"Ошибка отправки email: {e}")
+        print(f"❌ Email send error: {e}")
         raise e

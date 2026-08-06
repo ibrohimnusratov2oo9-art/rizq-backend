@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import uvicorn
 
 from database import engine
 from models import Base
@@ -11,7 +13,7 @@ from products import router as products_router
 from sellers import router as sellers_router
 from users import router as users_router
 from onboarding import router as onboarding_router
-from subscriptions import router as subscriptions_router  # ← НОВОЕ!
+from subscriptions import router as subscriptions_router
 from admin import router as admin_router
 from chat import router as chat_router
 
@@ -26,7 +28,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # позже сделаем строже
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,7 +50,8 @@ app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(subscriptions_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
-app.include_router(chat_router, prefix=API_PREFIX)  # ← НОВОЕ!
+app.include_router(chat_router, prefix=API_PREFIX)
+
 @app.get("/")
 def root():
     return {
@@ -60,3 +63,8 @@ def root():
 @app.get("/api/v1/health")
 def health():
     return {"status": "ok", "service": "RIZQ"}
+
+# ✅ ВАЖНО! Запуск на правильном порту
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
