@@ -1,23 +1,15 @@
-import smtplib
 import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import requests
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_API_URL = "https://api.resend.com/emails"
 
 
 def send_verification_email(to_email: str, code: str) -> bool:
-    """Отправляет email с кодом подтверждения"""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        raise Exception("SMTP credentials not configured in environment")
-
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"RIZQ <{SMTP_USER}>"
-    msg["To"] = to_email
-    msg["Subject"] = "Код подтверждения RIZQ"
+    """Отправляет email с кодом подтверждения через Resend API"""
+    
+    if not RESEND_API_KEY:
+        raise Exception("RESEND_API_KEY not configured in environment")
 
     html_body = f"""
     <!DOCTYPE html>
@@ -55,15 +47,34 @@ def send_verification_email(to_email: str, code: str) -> bool:
     </html>
     """
 
-    msg.attach(MIMEText(html_body, "html"))
+    payload = {
+        "from": "RIZQ <onboarding@resend.dev>",
+        "to": [to_email],
+        "subject": "Код подтверждения RIZQ",
+        "html": html_body
+    }
+
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
-        print(f"✅ Email sent to {to_email}")
-        return True
-    except Exception as e:
+        response = requests.post(
+            RESEND_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+
+        if response.status_code in [200, 201, 202]:
+            print(f"✅ Email sent to {to_email}")
+            return True
+        else:
+            error_msg = f"Resend API error {response.status_code}: {response.text}"
+            print(f"❌ {error_msg}")
+            raise Exception(error_msg)
+
+    except requests.exceptions.RequestException as e:
         print(f"❌ Email send error: {e}")
         raise e
