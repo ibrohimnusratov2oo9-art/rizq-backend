@@ -179,4 +179,57 @@ class ChatMessage(Base):
     sender_role = Column(String, nullable=False)  # customer, courier, seller
     message = Column(String, nullable=False)
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)    
+    created_at = Column(DateTime, default=datetime.utcnow)  
+
+# ====================== PROMOTION (АКЦИИ) ======================
+class Promotion(Base):
+    __tablename__ = "promotions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seller_phone = Column(String, nullable=False, index=True)
+    
+    # Основное
+    title = Column(String, nullable=False)  # Название акции
+    description = Column(String, nullable=True)  # Описание
+    
+    # Тип акции
+    # discount_percent - скидка в процентах
+    # discount_amount - скидка фиксированной суммой
+    # buy_one_get_one - купи 1 = 1 бесплатно
+    # gift_on_order - подарок при заказе от суммы
+    # free_delivery - бесплатная доставка
+    promo_type = Column(String, nullable=False)
+    
+    # Значения (зависят от типа)
+    discount_value = Column(Float, nullable=True)  # % или сумма
+    min_order_amount = Column(Float, nullable=True)  # минимальная сумма заказа
+    
+    # Для "купи X получи Y"
+    buy_quantity = Column(Integer, nullable=True)  # сколько купить
+    get_quantity = Column(Integer, nullable=True)  # сколько получить бесплатно
+    
+    # Привязка к продуктам
+    # all - на весь ассортимент
+    # category - на категорию
+    # products - на конкретные продукты
+    apply_to = Column(String, default="all")
+    apply_category = Column(String, nullable=True)  # если apply_to = category
+    product_ids = Column(JSON, nullable=True)  # если apply_to = products
+    
+    # Подарок (для gift_on_order)
+    gift_product_id = Column(Integer, nullable=True)
+    gift_product_name = Column(String, nullable=True)
+    
+    # Даты
+    has_end_date = Column(Boolean, default=False)  # с датой окончания или без
+    start_date = Column(DateTime, default=datetime.utcnow)
+    end_date = Column(DateTime, nullable=True)
+    
+    # Статус
+    is_active = Column(Boolean, default=True)
+    
+    # Статистика
+    times_used = Column(Integer, default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
