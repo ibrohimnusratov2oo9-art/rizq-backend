@@ -16,6 +16,7 @@ from onboarding import router as onboarding_router
 from subscriptions import router as subscriptions_router
 from admin import router as admin_router
 from chat import router as chat_router
+from upload import router as upload_router
 
 # Создаём таблицы при запуске
 Base.metadata.create_all(bind=engine)
@@ -51,6 +52,7 @@ app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(subscriptions_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(chat_router, prefix=API_PREFIX)
+app.include_router(upload_router, prefix="/api/v1")
 
 @app.get("/")
 def root():

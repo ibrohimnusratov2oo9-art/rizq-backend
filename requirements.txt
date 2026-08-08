@@ -6,3 +6,4 @@ passlib[bcrypt]
 python-multipart
 psycopg2-binary
 requests==2.31.0
+cloudinary==1.40.0
