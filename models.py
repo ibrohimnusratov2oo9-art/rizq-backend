@@ -110,11 +110,38 @@ class Seller(Base):
     phone = Column(String, unique=True, nullable=False)
     name = Column(String, nullable=False)
     seller_type = Column(String, nullable=False)
+    
+    # Локация
     address = Column(String, nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    
+    # Медиа (Cloudinary)
+    image_url = Column(String, nullable=True)  # Обложка
+    logo_url = Column(String, nullable=True)   # Логотип
+    
+    # Контакты
+    phone_public = Column(String, nullable=True)  # Публичный телефон
+    description = Column(String, nullable=True)
+    
+    # Часы работы (JSON для каждого дня недели)
+    # Формат: {"mon": {"open": "09:00", "close": "23:00", "is_open": true}, ...}
+    working_hours = Column(JSON, nullable=True)
+    
+    # Статус
     is_active = Column(Boolean, default=True)
+    is_open = Column(Boolean, default=True)  # Открыто прямо сейчас (быстрый переключатель)
+    
+    # Рейтинг
+    rating = Column(Float, default=0)
+    reviews_count = Column(Integer, default=0)
+    
+    # Финансы
+    balance = Column(Float, default=0)
+    total_earnings = Column(Float, default=0)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ====================== COURIER PAYOUT ======================
